@@ -5,27 +5,27 @@
 # This is a more or less simple docker backup tool for docker-compose.
 # It is limited to running containers only.
 #
-# copyright (c) 2023 chris, GPL version 3
+# copyright (c) 2023 chillje, GPL version 3
 
 IAM="$(basename "${0}")"
 
 
 BACKUP_PATH=${BACKUP_PATH:-"/opt/backup/docker"}
 
-## backup all containers
-#mapfile -t CONTAINER_NAMES< <(
-#  docker ps --format "{{.Names}}")
-
 # backup special containers
-CONTAINER_NAMES=${CONTAINER_NAMES:-"influxdb nginx gitea"}
+CONTAINER_NAMES=${CONTAINER_NAMES:-"nginx gitea"}
+
+[ -f simple-docker-backup.ini ] && source simple-docker-backup.ini
 
 # Help function.
 help() {
   echo "usage ${IAM}: [OPTION...]"
-  warn "This is limited to running containers only!"
+  warn "This is limited to running containers only"
   warn "Define your containers in the script in \"\$CONTAINER_NAMES\""
+  warn "or use the ini-file simple-docker-backup.ini"
   cat << EOF
 OPTIONs:
+ -a|--all          backup all running docker-compose container
  -p|--postgres     create postgres db backup
  -s|--storage      create persistent storage backup
  -c|--config       also save whole config folder (incl. docker-compose.yml)
@@ -52,7 +52,7 @@ depCheck() {
   local missingDeps
   for (( i=0; i<${#deps[@]}; i++))
   do
-    [ -z $(command -v "${deps[$i]}") ] && {
+    [ -z $(command -v ${deps[$i]}) ] && {
       if [ "${deps[$i]}" == "pg_dumpall" ]
       then
           missingDeps+=("postgresql-client")
@@ -61,11 +61,10 @@ depCheck() {
       fi
     }
   done
-  [ ! -z "${missingDeps}" ] && apt-get install -y "${missingDeps[@]}" 
+  [ ! -z ${missingDeps} ] && apt-get install -y "${missingDeps[@]}" 
 }
 
 docker_storage_backup() {
-
   local service_name=${1}
 
   mapfile -t cnames < <(docker ps --filter "label=com.docker.compose.project=$service_name" --format "{{.Names}}")
@@ -74,24 +73,24 @@ docker_storage_backup() {
 
     echo "Backup for $container started.."
 
-    [ -d "${BACKUP_PATH}"/"${service_name}" ] || mkdir -m 700 "${BACKUP_PATH}"/"${service_name}"
-    [ -d "${BACKUP_PATH}"/"${service_name}" ] || { 
+    [ -d ${BACKUP_PATH}/${service_name} ] || mkdir -m 700 ${BACKUP_PATH}/${service_name}
+    [ -d ${BACKUP_PATH}/${service_name} ] || { 
       warn "Backup path ${BACKUP_PATH}/${service_name} not existent, exiting.."
       exit 1 
     }
 
     mapfile -t cvolumes< <(
-      docker inspect "${container}" | jq -r '.[].Mounts[] | select(.Type == "volume") | .Destination')
+      docker inspect ${container} | jq -r '.[].Mounts[] | select(.Type == "volume") | .Destination')
 
     # create backup from persistent storage volume
-    docker run --rm --volumes-from "${container}" -v "${BACKUP_PATH}"/"${service_name}"/:/backup ubuntu tar czf /backup/"${date}"-"${container}"-volumes.tgz "${cvolumes[@]}"
+    docker run --rm --volumes-from ${container} -v ${BACKUP_PATH}/${service_name}/:/backup ubuntu tar czf /backup/${date}-${container}-volumes.tgz ${cvolumes[@]}
   done
 
   [ -n "${PRM_CONFIG}" ] && {
 
     echo "config sichern von $service_name"
     local compose_dir=$(docker inspect --format='{{index .Config.Labels "com.docker.compose.project.working_dir"}}' ${cnames[0]})
-    tar czf "${BACKUP_PATH}"/"${service_name}"/"${date}"-"${service_name}"-compose.tgz "$compose_dir"
+    tar czf ${BACKUP_PATH}/${service_name}/${date}-${service_name}-compose.tgz $compose_dir
     [ -f "${BACKUP_PATH}/${service_name}/${date}-${service_name}-compose.tgz" ] || {
       warn "Could not backup compose config dir, exiting.."
       exit 1
@@ -107,18 +106,19 @@ docker_postgres_backup() {
 
   for container in "${cnames[@]}"; do
 
-    [ $(docker exec "${container}" which pg_dumpall) ] && {
+    [ $(docker exec ${container} which pg_dumpall) ] && {
       echo "Postgre sql backup for $container started.."
 
-      [ -d "${BACKUP_PATH}"/"${service_name}" ] || mkdir -m 700 "${BACKUP_PATH}"/"${service_name}"
-      [ -d "${BACKUP_PATH}"/"${service_name}" ] || { 
+      [ -d ${BACKUP_PATH}/${service_name} ] || mkdir -m 700 ${BACKUP_PATH}/${service_name}
+      [ -d ${BACKUP_PATH}/${service_name} ] || { 
         warn "Backup path ${BACKUP_PATH}/${service_name} not existent, exiting.."
         exit 1 
       }
 
-      local postgre_user=$(docker exec -it "$container" sh -c "echo \$POSTGRES_USER" | sed 's/[^A-Za-z0-9 ]//g')
+      local postgre_user=$(docker exec -it $container sh -c "echo \$POSTGRES_USER" | sed 's/[^A-Za-z0-9 ]//g')
       [ "${postgre_user}" != "" ] && {
-        docker exec "${container}" pg_dumpall -U "$postgre_user" | gzip > "${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz"
+        echo "Creating ${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz"
+        docker exec ${container} pg_dumpall -U $postgre_user | gzip > "${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz"
       } || {
         echo "Can't extract postgres user, skipping.."
       }
@@ -133,15 +133,14 @@ docker_postgres_backup() {
 #}
 
 cleanup() {
+  local service_name=${1}
 
-  local cname=${1}
-
-  [ -d "${BACKUP_PATH}"/"${cname}" ] && {
-    find "${BACKUP_PATH}"/"${cname}"/*-volumes.tgz -type f | head -n -10 | xargs rm -fv
-    find "${BACKUP_PATH}"/"${cname}"/*-compose.tgz -type f | head -n -10 | xargs rm -fv
-#    find ${BACKUP_PATH}/${cname}/*-postgres.dumpall -type f | head -n -10 | xargs rm -fv
+  [ -d ${BACKUP_PATH}/${service_name} ] && {
+    find ${BACKUP_PATH}/${service_name}/*-volumes.tgz -type f | head -n -10 | xargs rm -fv
+    find ${BACKUP_PATH}/${service_name}/*-compose.tgz -type f | head -n -10 | xargs rm -fv
+    find ${BACKUP_PATH}/${service_name}/*-postgres.dumpall -type f | head -n -10 | xargs rm -fv
   } || {
-    echo "No backups for container \"${cname}\" found, skipping.."
+    echo "No backups for container \"${service_name}\" found, skipping.."
   }
 }
 
@@ -158,31 +157,37 @@ main() {
   }
 
 
-  [ ! -d "${BACKUP_PATH}" ] && {
+  [ ! -d ${BACKUP_PATH} ] && {
     warn "${IAM}: Backup-Path \"${BACKUP_PATH}\" nonexistend."
     echo "${IAM}: Please create the \"${BACKUP_PATH}\" by yourself."
     exit 1
+  }
+
+  # backup all containers
+  [ -n "${PRM_ALL_CONTAINERS}" ] && {
+    unset CONTAINER_NAMES
+    mapfile -t CONTAINER_NAMES< <(docker ps --format "{{.Names}}")
   }
 
   date=$(isodate)
 
   [ -n "${PRM_STORAGE}" ] && {
     # Start backup for all containers
-    for container in "${CONTAINER_NAMES[@]}"; do
-      docker_storage_backup "$container"
+    for container in ${CONTAINER_NAMES[@]}; do
+      docker_storage_backup $container
     done
   }
 
   [ -n "${PRM_POSTGRES}" ] && {
     # Start backup for all containers
-    for container in "${CONTAINER_NAMES[@]}"; do
-    docker_postgres_backup "$container"
+    for container in ${CONTAINER_NAMES[@]}; do
+    docker_postgres_backup $container
     done
   }
 
   [ -n "${PRM_DELETE}" ] && {
-    for container in "${CONTAINER_NAMES[@]}"; do
-      cleanup "$container"
+    for container in ${CONTAINER_NAMES[@]}; do
+      cleanup $container
     done
   }
 }
@@ -200,6 +205,7 @@ main() {
 # The option declarations.
 unset PRM_POSTGRES PRM_STORAGE PRM_CONFIG PRM_DELETE
 while [ "${#}" -gt '0' ]; do case "${1}" in
+  '-a'|'--all') PRM_ALL_CONTAINERS='true';;
   '-p'|'--postgres') PRM_POSTGRES='true';;
   '-s'|'--storage') PRM_STORAGE='true';;
   '-c'|'--config') PRM_CONFIG='true';;
