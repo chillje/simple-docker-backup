@@ -8,14 +8,12 @@
 # copyright (c) 2023 chillje, GPL version 3
 
 IAM="$(basename "${0}")"
-
-
+IAM_PATH="$(cd "$(dirname "$0")" && pwd)"
+IAM_INI="${IAM:0:-3}.ini"
 BACKUP_PATH=${BACKUP_PATH:-"/opt/backup/docker"}
-
-# backup special containers
 CONTAINER_NAMES=${CONTAINER_NAMES:-"nginx gitea"}
 
-[ -f simple-docker-backup.ini ] && source simple-docker-backup.ini
+[ -f "${IAM_PATH}/${IAM_INI}" ] && source "${IAM_PATH}/${IAM_INI}"
 
 # Help function.
 help() {
