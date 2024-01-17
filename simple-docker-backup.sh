@@ -69,7 +69,7 @@ docker_storage_backup() {
 
   for container in "${cnames[@]}"; do
 
-    echo "Backup for $container started.."
+    echo "Backup for \"$container\" started.."
 
     [ -d ${BACKUP_PATH}/${service_name} ] || mkdir -m 700 ${BACKUP_PATH}/${service_name}
     [ -d ${BACKUP_PATH}/${service_name} ] || { 
@@ -81,20 +81,24 @@ docker_storage_backup() {
       docker inspect ${container} | jq -r '.[].Mounts[] | select(.Type == "volume") | .Destination')
 
     # create backup from persistent storage volume
+    echo "Creating volume backup for container \"${container}\" of docker service \"${service_name}\"."
     docker run --rm --volumes-from ${container} -v ${BACKUP_PATH}/${service_name}/:/backup ubuntu tar czf /backup/${date}-${container}-volumes.tgz ${cvolumes[@]}
+
   done
 
   [ -n "${PRM_CONFIG}" ] && {
 
-    echo "config sichern von $service_name"
     local compose_dir=$(docker inspect --format='{{index .Config.Labels "com.docker.compose.project.working_dir"}}' ${cnames[0]})
+
+    echo "Creating config backup of docker service \"${service_name}\"."
     tar czf ${BACKUP_PATH}/${service_name}/${date}-${service_name}-compose.tgz $compose_dir
     [ -f "${BACKUP_PATH}/${service_name}/${date}-${service_name}-compose.tgz" ] || {
-      warn "Could not backup compose config dir, exiting.."
+      warn "Could not backup compose config dirf for \"${service_name}\", exiting.."
       exit 1
     }
   }
 
+  echo
 }
 
 docker_postgres_backup() {
@@ -104,26 +108,29 @@ docker_postgres_backup() {
 
   for container in "${cnames[@]}"; do
 
+    echo "Check if pg_dumpall in \"${container}\".."
     [ $(docker exec ${container} which pg_dumpall) ] && {
-      echo "Postgre sql backup for $container started.."
+      echo "Postgre sql backup for \"$container\" started.."
 
       [ -d ${BACKUP_PATH}/${service_name} ] || mkdir -m 700 ${BACKUP_PATH}/${service_name}
       [ -d ${BACKUP_PATH}/${service_name} ] || { 
-        warn "Backup path ${BACKUP_PATH}/${service_name} not existent, exiting.."
+        warn "Backup path \"${BACKUP_PATH}/${service_name}\" not existent, exiting.."
         exit 1 
       }
 
       local postgre_user=$(docker exec -it $container sh -c "echo \$POSTGRES_USER" | sed 's/[^A-Za-z0-9 ]//g')
       [ "${postgre_user}" != "" ] && {
-        echo "Creating ${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz"
+        echo "Creating \"${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz\""
         docker exec ${container} pg_dumpall -U $postgre_user | gzip > "${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz"
       } || {
-        echo "Can't extract postgres user, skipping.."
+        warn "Can't extract postgres user of container \"$container\" from docker service \"${service_name}\", skipping.."
       }
     } || {
-      warn "No \"pg_dumpall\" in container $container, skipping.."
+      warn "No \"pg_dumpall\" in container \"$container\" from docker service \"${service_name}\", skipping.."
     }
   done
+
+  echo
 }
 
 #docker_mariadb_backup() {
@@ -150,7 +157,7 @@ main() {
 
   # Check if we have listed containers
   [ -z "$CONTAINER_NAMES" ] && {
-    warn "${IAM}: Need at least one docker container in $CONTAINER_NAMES, exiting.."
+    warn "${IAM}: Need at least one docker container in env \"\$CONTAINER_NAMES\", exiting.."
     exit 1
   }
 
