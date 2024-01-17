@@ -10,14 +10,14 @@
 IAM="$(basename "${0}")"
 IAM_PATH="$(cd "$(dirname "$0")" && pwd)"
 IAM_INI="${IAM:0:-3}.ini"
-BACKUP_PATH=${BACKUP_PATH:-"/opt/backup/docker"}
-CONTAINER_NAMES=${CONTAINER_NAMES:-"nginx gitea"}
 
 [ -f "${IAM_PATH}/${IAM_INI}" ] && source "${IAM_PATH}/${IAM_INI}"
+BACKUP_PATH=${BACKUP_PATH:-""}
+CONTAINER_NAMES=${CONTAINER_NAMES:-""}
 
 # Help function.
 help() {
-  echo "usage ${IAM}: [OPTION...]"
+  echo "usage ${IAM}: [OPTION...] [some-docker-compose-project-name]"
   warn "This is limited to running containers only"
   warn "Define your containers in the script in \"\$CONTAINER_NAMES\""
   warn "or use the ini-file simple-docker-backup.ini"
@@ -32,7 +32,7 @@ OPTIONs:
 
 examples:
  * ${IAM} -s -c
- * export BACKUP_PATH="/some/space/"; ${0} -s -c
+ * ${IAM} -s -c some-docker-compose-project-name
 EOF
 }
 
@@ -81,8 +81,12 @@ docker_storage_backup() {
       docker inspect ${container} | jq -r '.[].Mounts[] | select(.Type == "volume") | .Destination')
 
     # create backup from persistent storage volume
-    echo "Creating volume backup for container \"${container}\" of docker service \"${service_name}\"."
-    docker run --rm --volumes-from ${container} -v ${BACKUP_PATH}/${service_name}/:/backup ubuntu tar czf /backup/${date}-${container}-volumes.tgz ${cvolumes[@]}
+    [ ${#cvolumes[@]} -gt 0 ] && {
+      echo "Creating volume backup for container \"${container}\" of docker service \"${service_name}\"."
+      docker run --rm --volumes-from ${container} -v ${BACKUP_PATH}/${service_name}/:/backup ubuntu tar czf /backup/${date}-${container}-volumes.tgz ${cvolumes[@]}
+    } || {
+      warn "No volumes in container \"${container}\" of docker service \"${service_name}\", skipping.."
+    }
 
   done
 
@@ -152,6 +156,8 @@ cleanup() {
 # This is the main function.
 main() {
 
+  date=$(isodate)
+
   # Check for needed dependencys.
   depCheck
 
@@ -168,13 +174,14 @@ main() {
     exit 1
   }
 
+  # get services via args 
+  [ ${#} -gt 0 ] && CONTAINER_NAMES="${@}"
+
   # backup all containers
   [ -n "${PRM_ALL_CONTAINERS}" ] && {
     unset CONTAINER_NAMES
     mapfile -t CONTAINER_NAMES< <(docker ps --format "{{.Names}}")
   }
-
-  date=$(isodate)
 
   [ -n "${PRM_STORAGE}" ] && {
     # Start backup for all containers
