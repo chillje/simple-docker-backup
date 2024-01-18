@@ -102,7 +102,7 @@ docker_storage_backup() {
     }
   }
 
-  echo
+  [ "$service_name" != "$(echo $CONTAINER_NAMES | awk -F\  '{print $NF}')" ] && echo
 }
 
 docker_postgres_backup() {
@@ -122,7 +122,7 @@ docker_postgres_backup() {
         exit 1 
       }
 
-      local postgre_user=$(docker exec -it $container sh -c "echo \$POSTGRES_USER" | sed 's/[^A-Za-z0-9 ]//g')
+      local postgre_user=$(docker exec -i $container sh -c "echo \$POSTGRES_USER" | sed 's/[^A-Za-z0-9 ]//g')
       [ "${postgre_user}" != "" ] && {
         echo "Creating \"${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz\""
         docker exec ${container} pg_dumpall -U $postgre_user | gzip > "${BACKUP_PATH}/${service_name}/${date}-${container}-postgres.dumpall.gz"
@@ -132,9 +132,10 @@ docker_postgres_backup() {
     } || {
       warn "No \"pg_dumpall\" in container \"$container\" from docker service \"${service_name}\", skipping.."
     }
+
   done
 
-  echo
+  [ "$service_name" != "$(echo $CONTAINER_NAMES | awk -F\  '{print $NF}')" ] && echo
 }
 
 #docker_mariadb_backup() {
